@@ -1,0 +1,218 @@
+---
+title: "Precipitation"
+output: html_document
+---
+
+# Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+opts_knit$set(root.dir = normalizePath('../'))
+```
+
+
+
+## read data
+
+```{r load, message=F}
+
+rm(list = ls())
+source("library.R")
+
+### load data
+load("./precipitation ECMWF/precipitation data.RData")
+
+
+
+### Choose London or Brussels
+
+#prec <- prec_Brussels
+#Temp <- temp_Brussels
+
+prec <- prec_London
+Temp <- temp_London
+
+
+### Choose length of data set
+
+#full data used
+N <- dim(prec)[1]
+
+
+
+### Choose forecast member
+
+#cur.forecast <- 'ENS'
+#cur.forecast <- 'CNT'
+cur.forecast <- 'HRES'
+
+
+### Read out data
+
+interval.time <- (dim(prec)[1]-N):dim(prec)[1]
+Y <- prec[interval.time,"24h", c('Y')]
+X <- prec[interval.time,"24h", c(paste0('X_',cur.forecast))]
+Temp <- Temp[interval.time, "24h", c(paste0('Z_',cur.forecast))]
+
+
+```
+
+
+
+```{r , message=F, warning=F, echo=F}
+
+
+########## Helpers
+extra <- 2
+TT <- length(Y)-extra
+
+#Uncomment line for robustness check. Uses only the data points applied in Patton and Timmermann 2007.
+#TT <- 123-extra
+
+T <- TT+extra
+
+
+# Interval
+int  <- (extra+1):T
+int1 <- (extra):(T-1)
+int2 <- (extra-1):(T-2)
+
+
+```
+
+
+# Mincer Zarnowitz
+
+```{r}
+res <- lm(Y~X);summary(res)$coef
+test <- linearHypothesis(res, vcov = vcovHAC(res), c("(Intercept) = 0", "X = 1"))
+test
+p <- signif(test$`Pr(>F)`[2],digits=2)
+```
+
+Test has a p-value of `r p`
+
+
+respective plot with regression line in blue
+```{r}
+plot(X,Y, ylim = c(0,30), xlim=c(0,30), xlab="X", ylab = "Y")
+abline(lm(Y~X), col="blue")
+abline(0,1, col="red")
+```
+
+
+# Constant quantile
+
+```{r}
+res <- estimate.functional(iden.fct = quantile_model,
+                           model_type = 'logit_const',
+                           Y = Y, X=X)
+summary(res$gmm)
+
+```
+
+
+# Constant expectile
+
+
+```{r }
+res <- estimate.functional(iden.fct = expectile_model,
+                           model_type = 'logit_const',
+                             Y = Y, X=X)
+summary(res$gmm)
+
+```
+
+# State dependent models
+
+
+## Linear dependent
+
+### ...on lagged outcome
+quantile
+```{r}
+res <- estimate.functional(iden.fct =   quantile_model ,model_type = 'linear',
+                           state_variable = Y[-length(Y)], Y = Y, X=X)
+summary(res$gmm)
+plot.levels(res)
+
+```
+
+expectile
+```{r }
+res <- estimate.functional(iden.fct =   expectile_model ,model_type = 'linear',
+                           state_variable = Y[-length(Y)], Y = Y, X=X)
+summary(res$gmm)
+plot.levels(res)
+
+```
+
+
+### ...on forecast
+quantile
+```{r }
+res <- estimate.functional(iden.fct =   quantile_model ,model_type = 'linear',
+                           state_variable = X, Y = Y, X=X)
+summary(res$gmm)
+
+plot.levels(res)
+```
+
+```{r }
+w <- cbind(rep(1,TT), # constant
+                 Y[int1], # lagged observation
+                 X[int],
+           Temp[int])  # forecast
+
+res <- estimate.functional(iden.fct =   quantile_model ,model_type = 'linear',
+                           instruments = w,
+                           state_variable = X[int], Y = Y[int], X=X[int])
+summary(res$gmm)
+
+plot.levels(res)
+```
+
+expectile
+```{r}
+res <- estimate.functional(iden.fct =   expectile_model ,model_type = 'linear',
+                           state_variable = X, Y = Y, X=X)
+summary(res$gmm)
+plot.levels(res)
+
+```
+
+```{r }
+w <- cbind(rep(1,TT), # constant
+                 Y[int1], # lagged observation
+                 X[int],
+           Temp[int])  # forecast
+
+res <- estimate.functional(iden.fct =   expectile_model ,model_type = 'linear',
+                           instruments = w,
+                           state_variable = X[int], Y = Y[int], X=X[int])
+summary(res$gmm)
+
+plot.levels(res)
+```
+
+### ...on Temperature forecast
+quantile
+```{r}
+res <- estimate.functional(iden.fct =   quantile_model ,model_type = 'linear',
+                           instruments = "state",
+                           state_variable = Temp, Y = Y, X=X)
+summary(res$gmm)
+plot.levels(res)
+```
+
+expectile
+```{r }
+res<- estimate.functional(iden.fct =   expectile_model ,model_type = 'linear',
+                          instruments = "all.state",
+                           state_variable = Temp, Y = Y, X=X)
+summary(res$gmm)
+plot.levels(res)
+```
+
+
