@@ -1,7 +1,6 @@
-rm(list = ls())
 source("library.R")
 
-reinbrowsern <-F
+
 # load observations
 Y<- read.csv("./gdp/observations.csv", sep=";", dec=",", header=TRUE)
 # format variable 'second' 
@@ -14,7 +13,6 @@ X$date <- as.Date(as.character(X$GBdate),"%Y%m%d")
 
 
 ####### Choose forecast closest to middle of the respective quarter
-
 year(X$date)<-2000
 X$comparison <-as.Date("02152000","%m%d%Y")
 X$comparison[(month(X$date)>3)] <- as.Date("05152000","%m%d%Y")
@@ -45,14 +43,13 @@ Y<-Y[,c('t','DATE','gRGDPF1','first','second','recent')]
 #Y<-Y[,c('recent','gRGDPF1')]
 Y<-Y[,c('first','gRGDPF1')]
 
-
-
+#estimate functional without state-dependence
 res <- estimate.functional(iden.fct = quantile_model,model_type = 'logit_const',
                            state_variable = NULL, Y = Y[,1], X=Y[,2])
 summary(res$gmm)
 
 
-
+#estimate functional with state-dependence on y_{t-1}
 res <- estimate.functional(iden.fct = quantile_model, model_type = "linear",
                            state_variable = Y[1:(length(Y[,1])-1),1], Y=Y[,1],X=Y[,2])
 
@@ -62,18 +59,9 @@ summary(res$gmm)
 plot.levels(res, show.p.value = F,limits = c(-5,10))+  scale_x_continuous("predicted growth rate", limits = c(-5,10))+
   theme_classic(20)
 
-# res <- estimate.functional(iden.fct = quantile_model, model_type = "reallinear",
-#                            state_variable = matrix(c(
-#                               rep(1, length(Y[1:(length(Y[,1])-1),1])),
-#                               Y[1:(length(Y[,1])-1),1],
-#                               Y[2:length(Y[,1]),2]),
-#                               ncol=3), 
-#                            Y=Y[,1],X=Y[,2])
-# summary(res$gmm)
 
 
-
-
+#estimate functional with state-dependence on x_{t}
 res <- estimate.functional(iden.fct = quantile_model, model_type = "linear",
                            state_variable = Y[,2], Y=Y[,1],X=Y[,2])
 summary(res$gmm)
@@ -90,8 +78,8 @@ confint(res$gmm, level = 0.9, lambda = FALSE)
 
 summary(res$gmm)
 
-wald.test(b = coef(res$gmm), Sigma = vcov(res$gmm), Terms = 2)
 
+# Show wald test
 linearHypothesis(res$gmm, c('Theta[2] = 0'), test = 'Chisq')
 
 
