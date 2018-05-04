@@ -32,113 +32,6 @@ test_names_const <- list(
   #######################      Constant spline     ###########################
   ############################################################################
 
-  
-  ######## ff66 ###########################################
-  
-  
-file <- "./results/supp_constspline.Rda"
-
-cur.instruments <- "ff66"
-
-# simulate_single(
-#   
-#   T.int = c(500,1000,2000,3000,4000,5000),
-#   tests = list(
-# 
-#            list(iden.fct = "const.spline", model="const.spline", instruments=cur.instruments),
-#            list(iden.fct = "quantile_model", model="logit_const", instruments=cur.instruments),
-#            list(iden.fct = "expectile_model", model="logit_const", instruments=cur.instruments)
-# 
-#          ), N=10, save_to = file)
-
-
-res <- readRDS(file)
-
-res <- res[res$T>=1000,]
-
-limits <- c(-1,1)
-
-#copy results to same variable as spline
-res$thh.Theta.1.[grepl("quantile",res$test)]<-res$Theta.1.[grepl("quantile",res$test)]
-res$thh.Theta.1.[grepl("expectile",res$test)]<-res$Theta.1.[grepl("expectile",res$test)]
-
-
-#adjust to estimation error
-res$thh.Theta.1.[grepl("quantile",res$test)]<-res$thh.Theta.1.[grepl("quantile",res$test)]+logit(pnorm(0.25))
-res$thh.Theta.1.[grepl("expectile",res$test)]<-res$thh.Theta.1.[grepl("expectile",res$test)]+logit(penorm(0.25))
-
-#move from theta1 to theta2
-res$thh.Theta.2.[grepl("quantile",res$test)]<-res$thh.Theta.1.[grepl("quantile",res$test)]
-res$thh.Theta.1.[grepl("quantile",res$test)]<-NA
-
-#rename
-res$test <- as.character(res$test)
-res$test[grepl("expectile",res$test)]<-"expectile"
-res$test[grepl("quantile",res$test)]<-"quantile"
-res$test[grepl("spline",res$test)]<-"spline"
-res$test <- as.factor(res$test)
-
-limits <- c(-1,1)
-
-#plot
-plot.single(save=res,theta0 = c(0,0,0),y.var = c("thh.Theta.1.","thh.Theta.2.","thh.Theta.3."),
-            limits = limits,ncol=3,show.legend = "bottom",
-            delete.y.lab=c(2,3))
-ggsave("supp_splines_const_T.pdf",width = 5,height = 3)
-
-
-
-
-## Histogram for T = 1000
-
-file <- "./results/supp_constspline1000.Rda"
-
-cur.instruments <- "patton.short"
-# simulate_single(delete.old.results = TRUE,
-# 
-#   T.int = c(1000),
-#   tests = list(
-# 
-#                list(iden.fct = "const.spline", model="const.spline", instruments=cur.instruments),
-#                list(iden.fct = "quantile_model", model="logit_const", instruments=cur.instruments),
-#                list(iden.fct = "expectile_model", model="logit_const", instruments=cur.instruments)
-# 
-#   ), N=1000, save_to = file)
-
-
-#### boxplots
-
-res <-readRDS(file)
-
-
-#copy results to same variable as spline
-res$thh.Theta.1.[grepl("quantile",res$test)]<-res$Theta.1.[grepl("quantile",res$test)]
-res$thh.Theta.1.[grepl("expectile",res$test)]<-res$Theta.1.[grepl("expectile",res$test)]
-
-#adjust to estimation error
-res$thh.Theta.1.[grepl("quantile",res$test)]<-res$thh.Theta.1.[grepl("quantile",res$test)]+logit(pnorm(0.25))
-res$thh.Theta.1.[grepl("expectile",res$test)]<-res$thh.Theta.1.[grepl("expectile",res$test)]+logit(penorm(0.25))
-
-#safe in long format
-ress <- melt(res,measure.vars = grep("thh.Theta",names(res)))
-
-#drop NAs
-ress <- ress[!is.na(ress$value),]
-
-limits <- c(-2,2)
-ggplot(ress,aes(x=variable,y=value,fill=test))+geom_boxplot(outlier.shape = 1)+
-  theme(
-    axis.title.x = element_blank(),legend.position = "none",
-    axis.text.x = element_blank())+ 
-  coord_cartesian(ylim = limits)+
-  facet_grid(.~test,labeller=my_labeller)+
-  ylab("estimation error")
-ggsave(filename = "supp_const_boxplot1000.pdf")
-
-
-
-######## patton instruments ###########################################
-
 
 file <- "./results/supp_constspline_T_p.Rda"
 
@@ -146,7 +39,7 @@ cur.instruments <- "patton.short"
 
 # simulate_single(
 # 
-#   T.int = c(500,1000,2000,3000,4000,5000),
+#   T.int = c(1000,2000,3000,4000,5000),
 #   tests = list(
 # 
 #            list(iden.fct = "const.spline", model="const.spline", instruments=cur.instruments),
@@ -157,8 +50,6 @@ cur.instruments <- "patton.short"
 
 
 res <- readRDS(file)
-
-res <- res[res$T>=1000,]
 
 limits <- c(-1,1)
 

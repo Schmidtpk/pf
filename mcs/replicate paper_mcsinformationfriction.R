@@ -18,7 +18,7 @@ T_int <- c(50,100,250,500,1000,2000,4000)
 
 
 # Fast version
-# N <- 900
+# N <- 50
 # file_name <- "./results/temp_spline_friction.Rda"
 # T_int <- c(100,250,1000)
 

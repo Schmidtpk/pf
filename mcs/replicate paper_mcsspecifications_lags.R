@@ -19,7 +19,7 @@ file_name <- "./results/save_expectiles_lag.Rda"
 
 
 #fast version
-N <- 10
+N <- 50
 file_name <- "./results/temp_expectiles_lag.Rda"
 
 
