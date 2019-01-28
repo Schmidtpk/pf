@@ -6,25 +6,24 @@
 # N_cur the number of simulation runs 
 # save_to defines path where results are safed
 # T_int is a vector of sample sizes which the simulation applies
-simulate <- function(forecasters= list(
-                        list(forecaster="model",model_type="linear",model_parameter=c(logit(pnorm(0.25)),0))
+simulate <- function(forecasters = list(
+                        list(type="X2",model="logistic",parameter=c(logit(pnorm(0.25)),0)),
+                        list(type="Y2",model="probit",parameter=c(logit(pnorm(0.25)),0))
                         ),
                     tests = list(
-                       list(iden.fct = "spline.flex", model="spline0", instruments="ff66"),
-                       list(iden.fct = "spline.flex", model="spliney", instruments="ff66"),
-                       list(iden.fct = "splinex", model="spline", instruments="ff66"),
-                       list(iden.fct = "spline.flex", model="splinex", instruments="ff66"),
-                       list(iden.fct = "quantile_model", model="linear", instruments="forecast"),
-                       list(iden.fct = "expectile_model", model="linear", instruments="forecast")
-                  
-                     ),
-                    T_int = c(100),
-                    dgp="patton",wmatrix="optimal",
-                    N=1,
+                       list(description = "quantile_logistic", iden.fct = quantiles, model=logistic,state="lag(lag(Y))", 
+                            instruments=c("X","lag(X-Y)","lag(X-Y)^2",
+                                          "lag(X)","lag(lag(X-Y))","lag(lag(X-Y))^2")),
+                       list(iden.fct = expectiles, model=logistic, state="lag(X)",
+                            instruments=c("X","lag(X-Y)","lag(X-Y)^2", 
+                                          "lag(X)","lag(lag(X-Y))","lag(lag(X-Y))^2"))
+                                ),
+                    T_int = c(200),
+                    dgp="patton",
+                    N=2,
                     save_to ="./results/test.Rda",
-                    delete.old.results=F,
-                    bandwidth="bwAndrews",
-                    gmm.type = "twoStep")
+                    delete.old.results=F,...
+                    )
   
 {
   #delete old file
@@ -39,101 +38,106 @@ simulate <- function(forecasters= list(
 
     for (T_cur in T_int)
     {
-      int <- 5:(T_cur)
-      int1 <- 4:(T_cur-1)
-      int2 <- 3:(T_cur-2)
-      int3 <- 2:(T_cur-3)
-      int4 <- 1:(T_cur-4)
       
-      data <- generate_data_y(T=T_cur, DGP=dgp)
+      datay <- generate_data_y(T=T_cur, DGP=dgp)
       data.key <- sample(1:1000000,1)
       
       for(forecaster in forecasters)
       {
 
      
-        
-        
-        
-        data <- generate_data_x(Y=data$Y, var=data$var, forecasting_type=forecaster$forecaster,
-                                forecasting_model_type = forecaster$model_type,
-                                forecasting_parameter = forecaster$model_parameter)
-        
-       
-      
+
+       data <- generate_forecast(datay,forecaster)
         
         for(test in tests)
         {
      
-          # connect real identification function to string
-          iden.fct.real <- get(test$iden.fct)
-          
-          
+          #define statevar
+          if(!is.null(test$state))
+          {
+            if (is.na(test$state))
+                statevar <- NULL
+            else
+              statevar <- eval(parse(text=test$state),data)
+          } else
+          {
+            statevar <- data$X
+          }
+      
 
-
-          #define model variable
-          model_variable_t <- find.model.var(test$model, data,int,int1)
-          
-          
-          if(test$iden.fct=="sp.flex")
-            node.cur <- c(-1,0,1)
+          if(identical(test$model,breakprobit))
+            theta0 <- c(0,0)
+          else if(identical(test$model,periodprobit))
+            theta0 <- c(0,0)
+          else if(identical(test$iden.fct,spline.flex.median))
+            theta0 <- rep(0,6)
           else
-            node.cur <- NULL
+            theta0 <- NULL
           
-          ####################### Estimate functional and save results
-   
-
-          temp_save <- try(estimate.functional(iden.fct = iden.fct.real,
-                                               state_variable = model_variable_t, 
-                                               model_type = test$model,
+          
+          if(exists("reinbrowsern"))
+            if(reinbrowsern)
+              browser()
+          
+          temp_save <- try(suppressMessages(estimate.functional(...,
+                                               iden.fct = test$iden.fct,
+                                               model = test$model,
+                                               theta0 = theta0,
+                                               stateVariable = statevar, 
                                                instruments = test$instruments,
-                                               Y = data$Y[int], X = data$X[int],
-                                               bandwidth = bandwidth,
-                                               wmatrix = wmatrix,
-                                               node = node.cur,
-                                               gmm.type=gmm.type), 
-                           silent=T)
+                                               Y = data$Y, X = data$X))
+                           ,silent=T)
           
+         
+          if(is.null(test$description))
+            test.char <- "NA"
+          else
+            test.char <- test$description
+          
+          
+          if(is.null(test$state))
+            test$state <- NA
           
           
           if (class(temp_save)=="try-error"){
             
             #safe as NA
             new.save <- data.frame(T=T_cur, p_value=NA,
-                                          forecaster=paste0(forecaster$forecaster,forecaster$model_type), 
-                                          test=paste0(test$iden.fct,test$model), 
-                                          instruments=test$instruments, 
-                                          theta=t(forecaster$model_parameter),
-                                          data.key=data.key,
-                                          bw=bandwidth,
-                                          wmatrix=wmatrix) 
+                                          state_test = test$state,
+                                          forecaster=paste0(forecaster$type,forecaster$model), 
+                                          test=test.char, 
+                                          instruments=paste0(test$instruments,collapse = '|'), 
+                                          theta=t(forecaster$parameter),
+                                          data.key=data.key) 
             
             message(temp_save)
-            warning(paste0("NA in result for ",test$iden.fct,"\n"))
+            warning(paste0("NA in result for test ",test$description,"\n"))
             
           } else {
             
-            p_temp <- try(specTest(temp_save$gmm)$test[2],silent=T)
+            conf <- confint(temp_save$gmm,level=.8)$test
+            hit <- forecaster$parameter > conf[,1] & forecaster$parameter < conf[,2]
             
+            p_temp <- try(specTest(temp_save$gmm)$test[2],silent=T)
+
             if(class(p_temp)=="try-error")
               p_temp <- NA
-            
-            
-            
-            
+
             new.save <- data.frame(T=T_cur, 
                                           p_value=p_temp, 
-                                          forecaster=paste0(forecaster$forecaster,forecaster$model_type), 
-                                          test=paste0(test$iden.fct,test$model), 
-                                          instruments=test$instruments, 
-                                          theta=t(forecaster$model_parameter),
-                                          thh=t(temp_save$gmm$coef),                                          data.key=data.key,
-                                          bw=bandwidth,
-                                          wmatrix=wmatrix)
+                                          state_test = test$state,
+                                          forecaster=paste0(forecaster$type,forecaster$model), 
+                                          test=test.char, 
+                                          instruments=paste(test$instruments,collapse = '|'), 
+                                          theta=t(forecaster$parameter),
+                                          thh=t(temp_save$gmm$coef),
+                                          sdh=matrix(diag(temp_save$gmm$vcov),nrow=1),
+                                          hit=t(hit)
+            )
             
       
             
-            names(new.save)[names(new.save)=="Theta.1."]<- "thh.Theta.1."
+    
 
             
           }
@@ -170,7 +174,8 @@ simulate <- function(forecasters= list(
     
     if((i*100/N)%%10==0)
     {
-      cat((i*100/N), "% finished \n")
+      cat('\r',(i*100/N), "% finished \n")
+      flush.console()
     }
   }
   

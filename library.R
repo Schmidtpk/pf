@@ -5,7 +5,10 @@ rm(list=ls())
 # require(devtools)
 # install_version("gmm", version = "1.5-2", repos = "http://cran.us.r-project.org" )
 
+# install.packages("devtools")
+#devtools::install_github("Schmidtpk/PointFore")
 library(gmm)
+library(PointFore)
 library(aod)
 library(lubridate)
 library(ggplot2)
@@ -14,17 +17,96 @@ library(xtable)
 library(car)
 library(cowplot)
 library(quantreg)
-library(rms)
+#library(rms)
 library(plyr)
+library(dplyr)
 library(gridExtra)
 library(ggpubr)
 library(grid)
-library(RandomFields)
-library(condMVNorm)
+library(mvtnorm)
+
+
 
 source("analyze.R")
 source("simulate_single.R")
 source("MCS.R")
+
+
+breaklogit <- function (stateVariable, theta) 
+{
+  if (length(theta) != 2) {
+    stop("Wrong dimension of parameter theta for break model")
+  }
+  return(boot::inv.logit((stateVariable>0)*theta[2] + theta[1]))
+}
+
+periodlogit <- function (stateVariable, theta) 
+{
+  if (length(theta) != 2) {
+    stop("Wrong dimension of parameter theta for periodic model")
+  }
+  return(boot::inv.logit((sin(stateVariable*2*pi/2))*theta[2] + theta[1]))
+}
+
+breakprobit <- function (stateVariable, theta) 
+{
+  if (length(theta) != 2) {
+    stop("Wrong dimension of parameter theta for break model")
+  }
+  return(pnorm((stateVariable>0)*theta[2] + theta[1]))
+}
+
+periodprobit <- function (stateVariable, theta) 
+{
+  if (length(theta) != 2) {
+    stop("Wrong dimension of parameter theta for periodic model")
+  }
+  return(pnorm((sin(stateVariable*2*pi/4))*theta[2] + theta[1]))
+}
+
+
+linearprobit <- function (stateVariable, theta) 
+{
+  if (length(theta) != 2) {
+    stop("Wrong dimension of parameter theta for linear probit model")
+  }
+  return(pnorm(stateVariable*theta[2] + theta[1]))
+}
+
+
+splines <- function(x,y,stateVariable, theta, model) #(parameter, x,y,model_variable, ...)
+{
+ 
+  if(length(theta)!=6){stop("Wrong number of parameters")}
+  
+  e <- y-x
+  
+  node <-  c(median(e[which(e<0)]),0,median(e[which(e>0)]))  
+  
+  if(sum(is.na(node))!=0)
+  {
+    warning("One node is NA. Subistitue -1,0,1.")
+    node <- c(-1,0,1)
+  }
+  
+  a1 <- - inv.logit(theta[1]+theta[2]*stateVariable-log(3))
+  
+  
+  a2 <- -(1-a1)* inv.logit(theta[3]+theta[4]*stateVariable-log(3))
+  
+  a3 <-  (1-a1-a2)* inv.logit(theta[5]+theta[6]*stateVariable-log(3))
+  
+  a4 <-   1-a1-a2-a3
+  
+  return(
+    ifelse(e<node[1], (node[2]-node[1])*a2 + abs(e)*a1,
+           ifelse(e<node[2], abs(e)*a2,
+                  ifelse(e<node[3], abs(e)*a3 ,
+                         (node[3]-node[1])*a3 + abs(e)*a4
+                  )))
+  )
+  
+}
 
 
 
@@ -34,7 +116,7 @@ source("MCS.R")
 find.model.var <- function(test.model, data,int,int1)
 {
   if(test.model=="linear" | test.model=="current_level" | test.model=="current_level2"){model_variable_t<-data$Y[int1]}
-  else if(test.model %in% c("logisticx","linearx")){model_variable_t<-data$X[int]}
+  else if(test.model %in% c("logistic0","logisticx","linearx")){model_variable_t<-data$X[int]}
   else if(test.model=="reallinear"){model_variable_t<-cbind(rep(1,length(data$Y[int1])),data$Y[int1])}
   else if (test.model == "break_logit_const"){model_variable_t<-(data$Y[int1]<0)}#(int<(T_max/2))}
   else if (test.model == "break_logit_constx"){model_variable_t<-(data$X[int]<0)}#(int<(T_max/2))}
@@ -54,7 +136,7 @@ find.model.var <- function(test.model, data,int,int1)
 
 
 
-estimate.functional <- function(iden.fct = quantile_model, model_type = 'current_level', 
+estimate.functional.old <- function(iden.fct = quantile_model, model_type = 'current_level', 
                                 state_variable=NULL, instruments = 'forecast', 
                                 Y, X, 
                                 demean.state = F,
@@ -95,6 +177,14 @@ estimate.functional <- function(iden.fct = quantile_model, model_type = 'current
       w <- cbind(rep(1,TT), # constant
                  Y[int1], # lagged observation
                  X[int])  # forecast
+      
+    } else if(instruments=='forecastabs')
+    {
+      
+      w <- cbind(rep(1,TT), # constant
+                 Y[int1], # lagged observation
+                 X[int],
+                 abs(X[int]))  # forecast
       
     } else if (instruments=='outcome2')##############################
     {
@@ -231,7 +321,7 @@ find.theta0 <- function(t_model_type,state_variable=NULL)
 {
   if (t_model_type == "const"){ theta_0 <-.5}
   else if (t_model_type == "logit_const"){theta_0 <- 0}
-  else if (t_model_type %in% c( "current_level" ,"linear" ,"logisticx","linearx","lineary")){theta_0 <- c(0,0)}
+  else if (t_model_type %in% c( "current_level" ,"linear" ,"logisticx","logistic0","linearx","lineary")){theta_0 <- c(0,0)}
   else if (t_model_type == "reallinear"){theta_0 <- c(0.5,rep(0,dim(state_variable)[2]-1))}
   else if (t_model_type == "current_level2"){theta_0 <- c(0,0,0)}
   else if (t_model_type == "break"){theta_0 <- c(0,0,0)}
@@ -262,7 +352,7 @@ plot.levels <- function(res, state.variable=NULL, conf.levels = c(0.6,0.9), show
   # define function for level
   alpha <- function(y){return(level_model(model_variable = y, type=t_model_type, parameter = tetastern))}
   
-  if(t_model_type=="current_level" | t_model_type == "linear" | t_model_type =="logisticx")
+  if(t_model_type=="current_level" | t_model_type == "linear" | t_model_type =="logisticx" | t_model_type =="logistic0")
   {
     mue_tau <- function(y){return(tetastern[1]+tetastern[2]*y)}
     var_tau <- function(y){return(var_theta[1,1]+var_theta[2,2]*y^2+2*var_theta[1,2]*y)}
@@ -284,7 +374,7 @@ plot.levels <- function(res, state.variable=NULL, conf.levels = c(0.6,0.9), show
     interval_y <- seq(quantile(state.variable, probs = 0.01),quantile(state.variable, probs = 0.99), length.out=20)
   } else {
     if(length(limits)!=2) {stop('Limits not well-defined')}
-    interval_y <- seq(limits[1],limits[2], length.out=20)
+    interval_y <- seq(limits[1],limits[2], length.out=200)
 }
   
     
@@ -376,6 +466,12 @@ level_model <- function(model_variable=NULL, type="const", parameter=NULL)
     if(is.null(model_variable)){stop("Model variable missing")}
     
     return(inv.logit(model_variable*parameter[2]+parameter[1]))
+  }else if (type=="logistic0")
+  {
+    if(length(parameter)!=2){stop("Wrong parameter")}
+    if(is.null(model_variable)){stop("Model variable missing")}
+    
+    return(inv.logit(model_variable*parameter[2]+parameter[1])*(model_variable>0))
   }else if (type=="current_level2")
   {
     if(length(parameter)!=3){stop("Wrong parameter")}
@@ -444,9 +540,7 @@ l1_quad_quad <- function(theta,x,y,z,...)
 
 l1_lin_lin_model<- function(x,y,model_variable , type,parameter,...)
 {
-  e <- y-x
-  ff <- (e>0)-level_model(model_variable=model_variable, type=type,parameter=parameter)
-  return(ff)
+  (y<=x)-level_model(model_variable=model_variable, type=type,parameter=parameter)
 }
 
 #for easier notation
@@ -454,9 +548,7 @@ quantile_model <- l1_lin_lin_model
 
 l1_quad_quad_model<- function(x,y,model_variable , type,parameter,...)
 {
-  e <- y-x
-  ff <- ((e>0)-level_model(model_variable=model_variable, type=type,parameter=parameter))*abs(e)
-  return(ff)
+abs((y<=x)-level_model(model_variable=model_variable, type=type,parameter=parameter))*(x-y)
 }
 
 #for easier notation
@@ -919,7 +1011,8 @@ generate_data_y <- function(DGP="patton", T=1000, extra = 100, forecasting_model
 {
   Y <- numeric(T+extra)
   
-  var <- numeric(T+extra)
+  var <- numeric(T+extra)  
+  mean <- numeric(T+extra)
   
   
   if(DGP=="gauss")
@@ -927,7 +1020,8 @@ generate_data_y <- function(DGP="patton", T=1000, extra = 100, forecasting_model
 
     Y <- gen.gauss(T+extra,...)
     var <- NA
-  } else
+    mean <- NA
+  } else 
   {
     
     
@@ -939,6 +1033,7 @@ generate_data_y <- function(DGP="patton", T=1000, extra = 100, forecasting_model
     Y[1]<-0
     
     var[1]<-1
+    mean[1]<-0
     epsilon <- rnorm(T+extra,0,1)
   
     for (t in 2:(T+extra))
@@ -950,6 +1045,7 @@ generate_data_y <- function(DGP="patton", T=1000, extra = 100, forecasting_model
             } else {
             
             var[t] <- b+c*var[t-1]+d*var[t-1]*epsilon[t-1]^2
+            mean[t] <- a * Y[t-1]
             Y[t] <- a * Y[t-1]+sqrt(var[t])*epsilon[t]
           }
       } else if (DGP=="AR1")
@@ -959,6 +1055,8 @@ generate_data_y <- function(DGP="patton", T=1000, extra = 100, forecasting_model
         } else {
           
           var[t] <- 1
+          mean[t] <- a * Y[t-1]
+          
           Y[t] <- a * Y[t-1]+sqrt(var[t])*epsilon[t]
         }
       } else if (DGP=="AR2")
@@ -968,18 +1066,132 @@ generate_data_y <- function(DGP="patton", T=1000, extra = 100, forecasting_model
         } else {
           
           var[t] <- 1
+          mean[t] <-  a * Y[t-1]+ b * Y[t-2]
           Y[t] <- a * Y[t-1]+ b * Y[t-2] + sqrt(var[t])*epsilon[t]
         }
       } else {stop("DGP unknown")}
     }
   }
 
-  return(data.frame(Y=Y[(extra+1):(T+extra)], var=var[(extra+1):(T+extra)]))
+  return(data.frame(Y=Y[(extra+1):(T+extra)], var=var[(extra+1):(T+extra)],mean=mean[(extra+1):(T+extra)]))
 }
 
 
 
 
+
+
+generate_forecast <- function(data, forecaster)
+#(Y, var=NULL,  forecasting_type="model", forecasting_model_type = "const", forecasting_parameter = .5,...)
+{
+  #generate forecaster
+  T <- nrow(data)
+  X <- numeric(T)
+  Y <- data$Y
+  var <- data$var
+  mean <- data$mean 
+  
+  
+  
+  if (class(forecaster$model)=="character" & grepl("Y",forecaster$type))
+    model.fct <- get(forecaster$model)
+  
+  # if(forecasting_model_type=="reallinear")
+  #   model_variable_loc<-matrix(0,nrow = T,ncol=length(forecasting_parameter))
+  
+  
+  # if (is.null(var)) {var <- numeric(T)}
+  
+  a <- .5
+  b <- 0.1
+  c <- 0.8
+  d <- 0.1
+  
+  X[1]<-0
+  X[2]<-0
+  
+  for (t in 3:(T))
+  {
+    
+    if (forecaster$type =="X")
+    {
+      
+
+      mean.now <- mean[t]
+      sd.now <- sqrt(var[t])
+      
+      if(forecaster$model =="linear")
+      {
+        X[t] <- (mean.now + sd.now*forecaster$parameter[1]) /
+              (1-sd.now*forecaster$parameter[2])    
+      } else if (forecaster$model=="break")
+      {
+        stop("not ready")
+        X[t] <- (mean.now + sd.now*forecaster$parameter[1])
+        if(X[t]<0)
+          X[t] <- X[t]-forecaster$parameter[2]*sd.now
+      } else if (forecaster$model=="period")
+      {
+        stop("not ready")
+        X[t] <- (mean.now + sd.now*forecaster$parameter[1])
+        if(X[t]<0)
+          X[t] <- X[t]-forecaster$parameter[2]*sd.now
+      }
+        
+    } else if (forecaster$type =="Y")
+    {
+      
+      
+      model.var.now <- Y[t-1]
+      
+      level_now <- model.fct(model.var.now, forecaster$parameter)
+      
+      X[t] <- mean[t] +  qnorm(level_now) * sqrt(var[t])     
+      
+    } else if (forecaster$type =="X2")
+    {
+      
+      mean.now <- a^2*Y[t-2]
+      sd.now <- sqrt(a^2 * var[t-1] + .1 + .9 * var[t-1]) 
+      
+      X[t] <- (mean.now + sd.now*forecaster$parameter[1]) /
+        (1-sd.now*forecaster$parameter[2])    
+      
+    } else if (forecaster$type =="Y2")
+    {
+      
+      model.var.now <- Y[t-2]
+      level_now <- model.fct(model.var.now, forecaster$parameter)
+      
+      mean.now <- a^2*Y[t-2]
+      sd.now <- sqrt(a^2 * var[t-1] + .1 + .9 * var[t-1]) 
+      
+      X[t] <- mean.now +  qnorm(level_now) * sd.now     
+      
+    } else if (forecaster$type =="patton")
+    {
+      
+      
+      X[t] <- .5*Y[t-1]+sqrt(var[t])*.25
+      
+      
+    } else if (forecaster$type =="patton2")
+    {
+
+      
+      X[t] <- .25*Y[t-2]+sqrt(a^2 * var[t-1] + .1 + .9 * var[t-1])*.25
+
+      
+    } else {stop("forecasting type unknown")}
+  }
+  
+  
+  return(data.frame(Y=Y,X=X))
+}
+
+
+
+#old version
 generate_data_x <- function(Y, var=NULL,  forecasting_type="model", forecasting_model_type = "const", forecasting_parameter = .5,...)
 {
   
@@ -1019,24 +1231,24 @@ generate_data_x <- function(Y, var=NULL,  forecasting_type="model", forecasting_
       
     } else if (forecasting_type=="model")
     {
-          if(forecasting_model_type=="current_level"| forecasting_model_type == "linear" |forecasting_model_type=="current_level2"){model_variable_loc[t]<-Y[t-1]}
-          else if (forecasting_model_type == "reallinear"){model_variable_loc[t,]<-c(1,Y[t-1])}#(t<(T/2))}
-          else if (forecasting_model_type == "break_logit_const"){model_variable_loc[t]<-(Y[t-1]<0)}#(t<(T/2))}
-          else if (forecasting_model_type =="logit_const"){model_variable_loc[t]<-0}
-          else if (forecasting_model_type =="periodic" | forecasting_model_type == "periodic_simple"){model_variable_loc[t]<-sin(Y[t-1]*2*pi/2)}#sin(t*2*pi/period_f)}
-          else if (forecasting_model_type =="periodic3"){model_variable_loc[t]<-t}
-          else {stop("forecasting_model_type unknown")}
-       
-          model.var.now <- model_variable_loc[t]
-          if(forecasting_model_type=="reallinear")
-            model.var.now <- model_variable_loc[t,]
-          
-          level_now <- level_model(model_variable=model.var.now, type=forecasting_model_type, parameter=forecasting_parameter)
-     
-          X[t] <- a*Y[t-1] +  qnorm(level_now) * sqrt(var[t])
-
-          
-          
+      if(forecasting_model_type=="current_level"| forecasting_model_type == "linear" |forecasting_model_type=="current_level2"){model_variable_loc[t]<-Y[t-1]}
+      else if (forecasting_model_type == "reallinear"){model_variable_loc[t,]<-c(1,Y[t-1])}#(t<(T/2))}
+      else if (forecasting_model_type == "break_logit_const"){model_variable_loc[t]<-(Y[t-1]<0)}#(t<(T/2))}
+      else if (forecasting_model_type =="logit_const"){model_variable_loc[t]<-0}
+      else if (forecasting_model_type =="periodic" | forecasting_model_type == "periodic_simple"){model_variable_loc[t]<-sin(Y[t-1]*2*pi/2)}#sin(t*2*pi/period_f)}
+      else if (forecasting_model_type =="periodic3"){model_variable_loc[t]<-t}
+      else {stop("forecasting_model_type unknown")}
+      
+      model.var.now <- model_variable_loc[t]
+      if(forecasting_model_type=="reallinear")
+        model.var.now <- model_variable_loc[t,]
+      
+      level_now <- level_model(model_variable=model.var.now, type=forecasting_model_type, parameter=forecasting_parameter)
+      
+      X[t] <- a*Y[t-1] +  qnorm(level_now) * sqrt(var[t])
+      
+      
+      
     }else if (forecasting_type=="modelx")
     {
       if(forecasting_model_type=="current_level"| forecasting_model_type == "linear" |forecasting_model_type=="current_level2"){model_variable<-function(x) x}
@@ -1044,9 +1256,9 @@ generate_data_x <- function(Y, var=NULL,  forecasting_type="model", forecasting_
       else if (forecasting_model_type == "break_logit_const"){model_variable<-function(x) x<0}#(t<(T/2))}
       else if (forecasting_model_type =="logit_const"){model_variable<-function(x) 0}
       else if (forecasting_model_type =="periodic" | forecasting_model_type == "periodic_simple"){model_variable<-function(x) sin(x*2*pi/2)}#sin(t*2*pi/period_f)}
-     # else if (forecasting_model_type =="periodic3"){model_variable_loc[t]<-t}
+      # else if (forecasting_model_type =="periodic3"){model_variable_loc[t]<-t}
       else {stop("forecasting_model_type unknown")}
-   
+      
       target_fun <- function(x)
       {
         return(abs(x - a*Y[t-1] +  qnorm(
@@ -1063,29 +1275,34 @@ generate_data_x <- function(Y, var=NULL,  forecasting_type="model", forecasting_
       if(t==2){X[t]<-a*Y[t-1]
       model_variable_loc[t]<-0}
       else{
-      
-      if(forecasting_model_type=="linear" | forecasting_model_type=="current_level"|forecasting_model_type=="current_level2"){model_variable_loc[t]<-Y[t-2]}
-      else if (forecasting_model_type == "break_logit_const"){model_variable_loc[t]<-((t-1)<(T/2))}
-      else if (forecasting_model_type =="logit_const"){model_variable_loc[t]<-0}
-      else if (forecasting_model_type =="periodic" | forecasting_model_type == "periodic_simple"){model_variable_loc[t]<-sin((t-1)*2*pi/period_f)}
-      else if (forecasting_model_type =="periodic3"){model_variable_loc[t]<-(t-1)}
-      else {stop("forecasting_model_type unknown")}
-      
-      level_now <- level_model(model_variable=model_variable_loc[t], type=forecasting_model_type, parameter=forecasting_parameter)
-      
-      sd.cur <- sqrt(a^2 * var[t-1] + .1 + .9 * var[t-1]) 
-      
-      mean.cur <- a^2*Y[t-2]
-      
-      X[t] <- mean.cur +  qnorm(level_now) * sd.cur
+        
+        if(forecasting_model_type=="linear" | forecasting_model_type=="current_level"|forecasting_model_type=="current_level2"){model_variable_loc[t]<-Y[t-2]}
+        else if (forecasting_model_type == "break_logit_const"){model_variable_loc[t]<-((t-1)<(T/2))}
+        else if (forecasting_model_type =="logit_const"){model_variable_loc[t]<-0}
+        else if (forecasting_model_type =="periodic" | forecasting_model_type == "periodic_simple"){model_variable_loc[t]<-sin((t-1)*2*pi/period_f)}
+        else if (forecasting_model_type =="periodic3"){model_variable_loc[t]<-(t-1)}
+        else {stop("forecasting_model_type unknown")}
+        
+        level_now <- level_model(model_variable=model_variable_loc[t], type=forecasting_model_type, parameter=forecasting_parameter)
+        
+        sd.cur <- sqrt(a^2 * var[t-1] + .1 + .9 * var[t-1]) 
+        
+        mean.cur <- a^2*Y[t-2]
+        
+        X[t] <- mean.cur +  qnorm(level_now) * sd.cur
       }
       
     } else {stop("forecasting type unknown")}
   }
   
-
+  
   return(data.frame(Y=Y,X=X,model_variable=model_variable_loc))
 }
+
+
+
+
+
 
 
 

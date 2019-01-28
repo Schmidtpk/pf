@@ -1,4 +1,89 @@
-#analyze dependent forecasters
+grid_arrange_shared_legend <- function(..., ncol = length(list(...)), nrow = 1, position = c("bottom", "right")) {
+  plots <- list(...)
+  position <- match.arg(position)
+  g <- ggplotGrob(plots[[1]] + 
+                    theme(legend.position = position))$grobs
+  legend <- g[[which(sapply(g, function(x) x$name) == "guide-box")]]
+  lheight <- sum(legend$height)
+  lwidth <- sum(legend$width)
+  gl <- lapply(plots, function(x) x +
+                 theme(legend.position = "none"))
+  gl <- c(gl, ncol = ncol, nrow = nrow)
+  
+  combined <- switch(position,
+                     "bottom" = arrangeGrob(do.call(arrangeGrob, gl), 
+                                            legend,ncol = 1,
+                                            heights = unit.c(unit(1, "npc") - lheight, lheight)),
+                     "right" = arrangeGrob(do.call(arrangeGrob, gl),
+                                           legend, ncol = 2,
+                                           widths = unit.c(unit(1, "npc") - lwidth, lwidth)))
+  
+  grid.newpage()
+  grid.draw(combined)
+  
+  # return gtable invisibly
+  invisible(combined)
+}
+#estiamtes the true covariance for linear model with state y_t-1 and patton gdp
+estimate.true.cov <- function(nn=10000, drop.until = 1, parameter.vector, instr=c("lag(Y)","X"),forecast.type="Y") {
+  
+  #simulate time series
+  dat_sim <- generate_data_y(DGP = "patton", T = nn)
+  if(forecast.type=="Y")
+    dat_sim <- generate_forecast(dat_sim, list(type = "Y", model = "linearprobit", parameter = parameter.vector))
+  else if(forecast.type=="X")
+    dat_sim <- generate_forecast(dat_sim, list(type = "X", model = "linear", parameter = parameter.vector))
+  else
+    stop("unknown forecaster")
+  
+  ### compute covariance matrix
+  #define m
+  m <- function(s) probit_linear(s,parameter.vector)
+  
+  
+  #define derivative of m
+  md_all <- function(s,theta) rbind(dnorm(s*theta[2]+theta[1]),dnorm(s*theta[2]+theta[1])*s)
+  md <- function(s) md_all(s,parameter.vector)
+  
+  #define instruments
+  w <- rep(1,nn)
+  for(inst_cur in instr)
+  {
+    #add instrument
+    w <- cbind(w,eval(parse(text=inst_cur),dat_sim))
+  }
+  
+  q <- ncol(w)
+  
+  if(forecast.type=="Y")
+    mm <- md(lag(dat_sim$Y))
+  else
+    mm <- md(dat_sim$X)
+  
+  g<- array(dim = c(nn/drop.until,2,q))
+  for(i in seq(1,nn/drop.until))
+  {
+    g[i, ,]<-matrix(mm[,i*drop.until],ncol=1) %*% matrix(w[i*drop.until,] ,nrow=1)
+  }
+  G <- apply(g, c(2,3), mean, na.rm=TRUE)
+  
+  
+  #compute first part (vectorized)
+  if(forecast.type=="Y")
+    diff.cur <- ((dat_sim$Y<dat_sim$X)-m(lag(dat_sim$Y)))^2
+  else
+    diff.cur <- ((dat_sim$Y<dat_sim$X)-m(dat_sim$X))^2  
+  
+  sigma<- array(dim = c(nn/drop.until,q,q))
+  for(i in seq(1,nn/drop.until))
+  {
+    sigma[i, ,]<-diff.cur[i*drop.until]*w[i*drop.until,]%*%t(w[i*drop.until,])
+  }
+  Sigma <- apply(sigma, c(2,3), mean, na.rm=TRUE)
+  
+  cov <- solve((G) %*% solve(Sigma) %*% t(G))
+  cov
+}
 
 
 
@@ -118,10 +203,14 @@ plot.single <- function(file_name,  save=NULL, y.var.estimate = NULL,
 
 
 
-plot.hist <- function(file, var="pval.t")
+plot.hist <- function(file, var="p_value", xlim=c(-2,2))
 {
+  if(is.character(file))
+    dat.cur <- readRDS(file)
+  else
+    dat.cur <- file
+
   #choose highest sample size
-  dat.cur <- readRDS(file)
   max.T <- max(dat.cur$T)
   dat.cur <- subset(dat.cur, T==max.T)
   
@@ -130,7 +219,7 @@ plot.hist <- function(file, var="pval.t")
   #plot histrogram
   ggplot(data = dat.cur, aes_string(x=var,fill="test"))+
     geom_histogram(position = "dodge",alpha=.5,bins = 20)+
-    xlim(c(-.1,1.1))+
+    xlim(xlim)+
     ylab(paste("T =",max.T))
 }  
   
@@ -143,8 +232,9 @@ plot.on.T <- function(file_name, alpha.level = 0.1,only.complete.cases=F, averag
   
   save <- readRDS(file_name)
   
-  if(length(unique(save$bw))!=1)
-    warning("Different bandwidth selection in results")
+  if(!is.null(save$bw))
+    if(length(unique(save$bw))!=1)
+      warning("Different bandwidth selection in results")
   
   ###Create plot data
   pos_T <-   c( 1,  2,  3,  4,  5,6,7)
@@ -157,7 +247,7 @@ plot.on.T <- function(file_name, alpha.level = 0.1,only.complete.cases=F, averag
   i <- sapply(save, is.factor)
   save[i] <- lapply(save[i], as.character)
   
-  colnames(save)[4]<-"Test"
+  colnames(save)[5]<-"Test"
   
   
 
@@ -167,15 +257,15 @@ plot.on.T <- function(file_name, alpha.level = 0.1,only.complete.cases=F, averag
     }
   
   #if some lags, show power with dashed line
-  if(sum(substr(save$instruments,1,3)=="lag"))
+  if(sum(grepl("lag",save$Test))>0)
   {
     save$power <- "dashed"
-    save$power[substr(save$instruments,1,3)=="lag"] <- "solid"
+    save$power[grepl("lag",save$Test)] <- "solid"
   } else
   {
     save$power <- "solid"
   }
-
+  
   
   res <- data.frame(T=numeric(), Test=character(), rejection.rate=numeric(),completed=numeric(),total=numeric(),power=character())
   
@@ -190,8 +280,8 @@ plot.on.T <- function(file_name, alpha.level = 0.1,only.complete.cases=F, averag
         
         sset_s <- subset(save, T==T_cur & Test==Test_cur & power==cur.power)
         
-        
-        
+  
+    
         compl_s <- sum(!is.na(sset_s$p_value))/length(sset_s[,1])
         
         #ignore non-complete cases
@@ -214,23 +304,24 @@ plot.on.T <- function(file_name, alpha.level = 0.1,only.complete.cases=F, averag
     
   }
   
-  print(res[complete.cases(res),])
+  res <- res[complete.cases(res),]
+  print(res)
   
 
   if(nice.names)
    {
     res$Test<-as.character(res$Test)
 
-    
-    res$Test[grepl(pattern ="expectile" ,x =  res$Test)]<-"Expectile"
-    res$Test[grepl(pattern ="quantile" ,x =  res$Test)]<-"Quantile"
-    res$Test[grepl(pattern ="spline" ,x =  res$Test)]<-"Spline"
+    res$Test[grepl(pattern ="expectile" ,x =  res$Test)]<-"expectile"
+    res$Test[grepl(pattern ="quantile" ,x =  res$Test)]<-"quantile"
+    res$Test[grepl(pattern ="spline" ,x =  res$Test)]<-"spline"
     
     res$Test<-as.factor(res$Test)
   }
+  
 
   # generate plot
-  qpp <- ggplot(data=subset(res), 
+  qpp <- ggplot(data=res, 
                 aes(x=T, y=rejection.rate, colour=Test, shape=Test))
   
   
@@ -245,7 +336,7 @@ plot.on.T <- function(file_name, alpha.level = 0.1,only.complete.cases=F, averag
 }
 
 
-rejection_table<-function(results, alpha_level = .1, T=NULL)
+rejection_table<-function(results, alpha_level = .1, T=NULL, target = "p_value")
 {
   if(is.null(T))
   {
@@ -258,8 +349,10 @@ rejection_table<-function(results, alpha_level = .1, T=NULL)
   {
     min.observation.number <-99999
 
+    
     resT <- subset(results, T==T_cur)
-    resT <- resT[complete.cases(resT$p_value),]
+    message("Drop ", sum(!complete.cases(resT[,target])))
+    resT <- resT[complete.cases(resT[,target]),]
     tests <- unique(resT[c("test","instruments")])
     n_tests <- dim(tests)[1]
     forecasts <-unique(resT[c("forecaster")])
@@ -281,17 +374,26 @@ rejection_table<-function(results, alpha_level = .1, T=NULL)
         forecast_cur <- forecasts[forecast_number,]
         resforecast <- subset(restest, forecaster==forecast_cur)
         
-        min.observation.number <- min(length(resforecast$p_value),min.observation.number)
+        min.observation.number <- min(length(resforecast[,target]),min.observation.number)
         
-        output[forecast_number,test_number]<- round(mean(resforecast$p_value < alpha_level), digits=3)
+        output[forecast_number,test_number]<- round(mean(resforecast[,target] < alpha_level), digits=3)
         
       }
     }
   
     cat("\n \n sample size = ", T_cur , "with minimal number of observations ", min.observation.number, "\n")
-    print(output)
-    
+
   }
+  
+  
+  # don't show instruments if unique
+  if(length(unique(resT$instruments))==1)
+    colnames(output)<-tests$test
+  
+  
+  # don't show test type if unique
+  if(length(unique(resT$test))==1)
+    colnames(output)<-tests$instruments
   
   return(output)
 }
