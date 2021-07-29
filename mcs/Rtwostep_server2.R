@@ -8,7 +8,10 @@ source("./R/dgp.R")
 source("./R/iden fcts.R")
 
 #set seed
-set.seed(3091987)
+#set.seed(2091987)
+ set.seed(3091987)
+# set.seed(4091987)
+# set.seed(5091987)
 
 ### Macro Paramters
 # data generating process
@@ -16,9 +19,12 @@ dgp <- "patton"
 center.cur <- FALSE
 
 # fast version
-N <- 50
-T_int <- c(50,100,250)
+N <- 500
+T_int <- c(50,100,250,500,1000,2000,4000)
+#file_name <- "./results/revision/friction_ser1.Rda"
 file_name <- "./results/revision/friction_ser2.Rda"
+# file_name <- "./results/revision/friction_ser3.Rda"
+# file_name <- "./results/revision/friction_ser4.Rda"
 
 inst.patton <-  c("X",      "lag(Y)",  "X^2",      "lag(Y)^2",  "X^3",      "lag(Y)^3")
 inst.patton2 <- c("lag(X)", "lag(Y,2)","lag(X)^2", "lag(Y,2)^2","lag(X)^3", "lag(Y,2)^3")

@@ -6,7 +6,7 @@ source("./R/dgp.R")
 source("./R/iden fcts.R")
 
 #set seed
-set.seed(2091987)
+set.seed(3091987)
 
 ### Macro Paramters
 
@@ -14,9 +14,9 @@ set.seed(2091987)
 dgp <- "patton"
 
 # fast version
-N <- 50
-T_int <- c(50,100,250)
-file_name <- "./results/standard.Rda"
+N <- 1000
+T_int <- c(50,100,250,500,1000,2000,4000)
+file_name <- "./results/standard_ser2.Rda"
 
 inst.patton <- c("X", "lag(Y)","X^2", "lag(Y)^2","X^3", "lag(Y)^3")
 inst.small <- c("X","lag(Y)")
